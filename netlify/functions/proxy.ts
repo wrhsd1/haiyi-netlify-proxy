@@ -1,17 +1,5 @@
-import { Context } from "@netlify/edge-functions";
-
-const pickHeaders = (headers: Headers, keys: (string | RegExp)[]): Headers => {
-  const picked = new Headers();
-  for (const key of headers.keys()) {
-    if (keys.some((k) => (typeof k === "string" ? k === key : k.test(key)))) {
-      const value = headers.get(key);
-      if (typeof value === "string") {
-        picked.set(key, value);
-      }
-    }
-  }
-  return picked;
-};
+import { Context } from "@netlify/functions";
+import fetch from "node-fetch";
 
 const CORS_HEADERS: Record<string, string> = {
   "access-control-allow-origin": "*",
@@ -19,60 +7,59 @@ const CORS_HEADERS: Record<string, string> = {
   "access-control-allow-headers": "*",
 };
 
-export default async (request: Request, context: Context) => {
-
-  if (request.method === "OPTIONS") {
-    return new Response(null, {
+export async function handler(event: any, context: Context) {
+  if (event.httpMethod === "OPTIONS") {
+    return {
+      statusCode: 200,
       headers: CORS_HEADERS,
-    });
+      body: ""
+    };
   }
 
-  const { pathname, searchParams } = new URL(request.url);
-  if(pathname === "/") {
-    let blank_html = `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <title>API proxy on Netlify Edge</title>
-</head>
-<body>
-  <h1>API proxy on Netlify Edge</h1>
-  <p>This project uses a reverse proxy to forward requests.</p>
-</body>
-</html>
-    `
-    return new Response(blank_html, {
-      headers: {
-        ...CORS_HEADERS,
-        "content-type": "text/html"
-      },
-    });
-  }
+  const reqData = JSON.parse(event.body);
 
-  const url = new URL(pathname, "https://www.seaart.ai/api/v1/chat-completion/completion");
-  searchParams.delete("_path");
+  const messages = reqData.messages.map((msg: any) => ({
+    content: msg.content,
+    role: msg.role,
+  }));
 
-  searchParams.forEach((value, key) => {
-    url.searchParams.append(key, value);
-  });
-
-  const headers = pickHeaders(request.headers, ["Content-Type", "Authorization"]);
-
-  const response = await fetch(url, {
-    body: request.body,
-    method: request.method,
-    headers,
-  });
-
-  const responseHeaders = {
-    ...CORS_HEADERS,
-    ...Object.fromEntries(response.headers),
-    "content-encoding": null
+  const newReqData = {
+    model_name: reqData.model,
+    messages: messages,
   };
 
-  return new Response(response.body, {
-    headers: responseHeaders,
-    status: response.status
+  const newHeaders = {
+    "Content-Type": "application/json",
+    "Token": event.headers.authorization.split(" ")[1]
+  };
+
+  const response = await fetch("https://www.seaart.ai/api/v1/chat-completion/completion", {
+    method: "POST",
+    body: JSON.stringify(newReqData),
+    headers: newHeaders,
   });
-};
+
+  const responseText = await response.text();
+
+  const formattedResponse = {
+    choices: [
+      {
+        message: {
+          role: "assistant",
+          content: responseText,
+        },
+        index: 0,
+        finish_reason: "stop",
+      },
+    ],
+  };
+
+  return {
+    statusCode: response.status,
+    headers: {
+      ...CORS_HEADERS,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(formattedResponse),
+  };
+}

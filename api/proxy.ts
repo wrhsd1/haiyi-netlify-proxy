@@ -1,5 +1,5 @@
-import { Context } from "@netlify/functions";
 import fetch from "node-fetch";
+import { VercelRequest, VercelResponse } from "@vercel/node";
 
 const CORS_HEADERS: Record<string, string> = {
   "access-control-allow-origin": "*",
@@ -7,16 +7,13 @@ const CORS_HEADERS: Record<string, string> = {
   "access-control-allow-headers": "*",
 };
 
-export async function handler(event: any, context: Context) {
-  if (event.httpMethod === "OPTIONS") {
-    return {
-      statusCode: 200,
-      headers: CORS_HEADERS,
-      body: ""
-    };
+export default async function (req: VercelRequest, res: VercelResponse) {
+  if (req.method === "OPTIONS") {
+    res.status(200).setHeader(CORS_HEADERS).end();
+    return;
   }
 
-  const reqData = JSON.parse(event.body);
+  const reqData = JSON.parse(req.body);
 
   const messages = reqData.messages.map((msg: any) => ({
     content: msg.content,
@@ -30,7 +27,7 @@ export async function handler(event: any, context: Context) {
 
   const newHeaders = {
     "Content-Type": "application/json",
-    "Token": event.headers.authorization.split(" ")[1]
+    "Authorization": req.headers.authorization
   };
 
   const response = await fetch("https://www.seaart.ai/api/v1/chat-completion/completion", {
@@ -54,12 +51,8 @@ export async function handler(event: any, context: Context) {
     ],
   };
 
-  return {
-    statusCode: response.status,
-    headers: {
-      ...CORS_HEADERS,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(formattedResponse),
-  };
+  res.status(response.status).setHeader({
+    ...CORS_HEADERS,
+    "Content-Type": "application/json",
+  }).send(formattedResponse);
 }
